@@ -9,10 +9,10 @@ products from Adafruit!
 /**************************************************************************/
 #include <ESP8266WiFi.h>
 #include <Wire.h>
-#include "Adafruit_MCP9808.h"
+#include "Adafruit_SHT31.h"
 
 // Create the MCP9808 temperature sensor object
-Adafruit_MCP9808 tempsensor = Adafruit_MCP9808();
+Adafruit_SHT31 tempsensor = Adafruit_SHT31();
 
 class comm {
   public:
@@ -35,22 +35,28 @@ class comm {
     if (started == 0) {
         Serial.print("Connecting to ");
         Serial.println(ssid);
+        WiFi.mode(WIFI_STA);
         WiFi.begin(ssid, password);
         started == 1;
+        IPAddress staticIP(192, 168, 1, 5); //static IP address
+        IPAddress gateway(192, 168, 1, 1); //Router's IP address
+        IPAddress subnet(255, 255, 255, 0);
         unsigned long connectMillis = millis();
-         while (WiFi.status() != WL_CONNECTED) {
+        while (WiFi.status() != WL_CONNECTED) {
           if (connectMillis + 30000 <= millis()) {
             //we failed--reset and try again next time.
+            Serial.println("Connect timed out.");
+            Serial.println();
             WiFi.disconnect();
             connected = 0;
             return 1;
           };
-          delay(500);
-          Serial.print(".");
+          delay(1000);
+          Serial.print(WiFi.status());
         };
         Serial.println("");
         Serial.println("WiFi connected");
-        Serial.println("IP address: ");
+        Serial.print("IP address: ");
         Serial.println(WiFi.localIP());
         connected = 1;
     } else {
@@ -58,7 +64,7 @@ class comm {
         unsigned long connectMillis = millis();
         WiFi.reconnect();
         while (WiFi.status() != WL_CONNECTED) {
-          if (connectMillis + 30000 <= millis()) {
+          if (connectMillis + 60000 <= millis()) {
             //we failed--reset and try again next time.
             WiFi.disconnect();
             connected = 0;
@@ -76,13 +82,14 @@ class comm {
         return 0;
       };
     };
-  
+    return 0;
   };
 
   bool send() {
     WiFiClient client;
-    if (!client.connect(host, httpPort)) {
+    while (!client.connect(host, httpPort)) {
       failCount++;
+      Serial.print("Server connect failed, #");
       Serial.println(failCount);
       delay(1000);
       if (failCount == 5) {
@@ -92,24 +99,30 @@ class comm {
       };
     };
 
-    String url = "/thermostat_api.php?outSub=true&temp=";
-    url = url + read();
-    url = url + "&humidity=0&pressure=0";
+    String url = "/thermostat_api.php?inSub=true&temp=";
+    url = url + readt();
+    url = url + "&humidity=";
+    url = url + readh();
+    url = url + "&id=1";
     Serial.println(url);
     // This will send the request to the server
     client.print(String("GET ") + url + " HTTP/1.1\r\n" +
                  "Host: " + host + "\r\n" +
                  "Connection: close\r\n\r\n");
+    return 0;
   };
 
-  float read(){
-    Serial.println("wake up MCP9808.... "); // wake up MCP9808 - power consumption ~200 mikro Ampere
-    tempsensor.wake();   // wake up, ready to read!
-  
+  float readt(){
     // Read and print out the temperature, also shows the resolution mode used for reading.
-    float f = tempsensor.readTempF();
-    tempsensor.shutdown_wake(1); // shutdown MSP9808 - power consumption ~0.1 mikro Ampere, stops temperature sampling
+    float f = tempsensor.readTemperature();
+    f = f * 9/5 + 32;
     return f;
+  };
+
+  float readh(){
+    // Read and print out the temperature, also shows the resolution mode used for reading.
+    float h = tempsensor.readHumidity();
+    return h;
   };
   
 };
@@ -119,22 +132,22 @@ comm cc = comm();
 void setup() {
   Serial.begin(9600);
   while (!Serial);
-  if (!tempsensor.begin(0x18)) {
-    Serial.println("Couldn't find MCP9808! Check your connections and verify the address is correct.");
+  if (!tempsensor.begin(0x44)) {
+    Serial.println("Couldn't find tempsensor! Check your connections and verify the address is correct.");
     while (1);
   }
     
-  Serial.println("Found MCP9808!");
+  Serial.println("Found tempSensor!");
 
-  tempsensor.setResolution(3);
+  tempsensor.heater(false);
 
-  cc.connect();
+  while (!cc.connect() == 0);
 
 }
 
 void loop() {
   cc.send();
-  delay(1000);
-  ESP.deepSleep(300e6);
+  delay(300000);
+  //ESP.deepSleep(30e6);
        
 }
