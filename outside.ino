@@ -1,18 +1,12 @@
-/**************************************************************************/
-/*!
-This is a demo for the Adafruit MCP9808 breakout
-----> http://www.adafruit.com/products/1782
-Adafruit invests time and resources providing this open source code,
-please support Adafruit and open-source hardware by purchasing
-products from Adafruit!
-*/
-/**************************************************************************/
 #include <ESP8266WiFi.h>
-#include <Wire.h>
+#include <PubSubClient.h>
 #include "Adafruit_SHT31.h"
 
 // Create the MCP9808 temperature sensor object
 Adafruit_SHT31 tempsensor = Adafruit_SHT31();
+WiFiClient espClient;
+PubSubClient client(espClient);
+  
 
 class comm {
   public:
@@ -21,26 +15,29 @@ class comm {
 
   }
 
-  const char* ssid     = "errans";
+  const char* ssid     = "errans.iot";
   const char* password = "zamb0rah";
-  const char* host = "192.168.1.143";
-  const int httpPort = 80;
+  const char* host = "homeassistant.iot";
+  const int mqtt_port = 1883;
+
   int failCount = 0;
   bool connected = 0;
   bool started = 0;
   unsigned long serverTempMillis = 0;
   float f;
 
-  bool connect() {
+
+
+  bool wfconnect() {
     if (started == 0) {
         Serial.print("Connecting to ");
         Serial.println(ssid);
         WiFi.mode(WIFI_STA);
         WiFi.begin(ssid, password);
         started == 1;
-        IPAddress staticIP(192, 168, 1, 5); //static IP address
-        IPAddress gateway(192, 168, 1, 1); //Router's IP address
-        IPAddress subnet(255, 255, 255, 0);
+        //IPAddress staticIP(192, 168, 1, 5); //static IP address
+        //IPAddress gateway(192, 168, 1, 1); //Router's IP address
+        //IPAddress subnet(255, 255, 255, 0);
         unsigned long connectMillis = millis();
         while (WiFi.status() != WL_CONNECTED) {
           if (connectMillis + 30000 <= millis()) {
@@ -82,33 +79,60 @@ class comm {
         return 0;
       };
     };
+
+    return 0;
+  };
+
+  bool mqttconnect() {
+    while (!client.connected()) {
+      Serial.print("Attempting MQTT connection...");
+      client.setServer(host, mqtt_port);
+      // Create a unique client ID based on ESP MAC address
+      String clientId = "8266iot-bedroom" + String(random(0, 1000));
+      
+      if (client.connect(clientId.c_str(), "mqttuser", "949500")) {
+        Serial.println("connected");
+      } else {
+        Serial.print("failed, rc=");
+        Serial.print(client.state());
+        Serial.println(" trying again in 5 seconds");
+        delay(5000);
+      };
+    };
     return 0;
   };
 
   bool send() {
-    WiFiClient client;
-    while (!client.connect(host, httpPort)) {
-      failCount++;
-      Serial.print("Server connect failed, #");
-      Serial.println(failCount);
-      delay(1000);
-      if (failCount == 5) {
-        connected = 0;
-        connect();
-        failCount = 0;
-      };
+    if (!client.connected()) {
+      Serial.println("Send loop needs to reconnect MQTT");
+      mqttconnect();
     };
 
-    String url = "/thermostat_api.php?inSub=true&temp=";
-    url = url + readt();
-    url = url + "&humidity=";
-    url = url + readh();
-    url = url + "&id=1";
-    Serial.println(url);
-    // This will send the request to the server
-    client.print(String("GET ") + url + " HTTP/1.1\r\n" +
-                 "Host: " + host + "\r\n" +
-                 "Connection: close\r\n\r\n");
+    char* mqtt_topic = "bedroom/sensor/temperature";
+    char payloadStr[8];
+    dtostrf(readt(), 1, 2, payloadStr);
+
+    Serial.print("Publishing sensor reading: ");
+    Serial.println(payloadStr);
+    
+    if (client.publish(mqtt_topic, payloadStr)) {
+      Serial.println("Publish successful!");
+    } else {
+      Serial.println("Publish failed.");
+    };
+
+    mqtt_topic = "bedroom/sensor/humidity";
+    dtostrf(readh(), 1, 2, payloadStr);
+
+    Serial.print("Publishing sensor reading: ");
+    Serial.println(payloadStr);
+    
+    if (client.publish(mqtt_topic, payloadStr)) {
+      Serial.println("Publish successful!");
+    } else {
+      Serial.println("Publish failed.");
+    };
+
     return 0;
   };
 
@@ -141,13 +165,16 @@ void setup() {
 
   tempsensor.heater(false);
 
-  while (!cc.connect() == 0);
+  while (!cc.wfconnect() == 0);
+  cc.mqttconnect();
 
 }
 
 void loop() {
   cc.send();
+  Serial.println("sent, delaying...");
   delay(300000);
+  Serial.println("delayed, looping");
   //ESP.deepSleep(30e6);
        
 }
